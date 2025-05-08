@@ -1,0 +1,58 @@
+{
+    "checksum": "auto_generated_checksum_if_needed_else_remove",
+    "roots": {
+       "bookmark_bar": {
+          "children": [
+             {
+                "date_added": "13268700000000000", 
+                "guid": "generated_guid_1",
+                "id": "5",
+                "name": "OSINT Framework",
+                "type": "url",
+                "url": "https://osintframework.com/"
+             },
+             {
+                "date_added": "13268700000000001",
+                "guid": "generated_guid_2",
+                "id": "6",
+                "name": "IntelTechniques Search Tools",
+                "type": "url",
+                "url": "https://inteltechniques.com/tools/"
+             },
+             {
+                "date_added": "13268700000000002",
+                "guid": "generated_guid_3",
+                "id": "7",
+                "name": "Wayback Machine",
+                "type": "url",
+                "url": "https://archive.org/web/"
+             }
+          ],
+          "date_added": "13268700000000000",
+          "date_modified": "13268700000000000",
+          "guid": "bookmark_bar_guid",
+          "id": "1",
+          "name": "Bookmarks bar",
+          "type": "folder"
+       },
+       "other": {
+          "children": [],
+          "date_added": "13268700000000000",
+          "date_modified": "13268700000000000",
+          "guid": "other_bookmarks_guid",
+          "id": "2",
+          "name": "Other bookmarks",
+          "type": "folder"
+       },
+       "synced": {
+          "children": [],
+          "date_added": "13268700000000000",
+          "date_modified": "13268700000000000",
+          "guid": "synced_bookmarks_guid",
+          "id": "3",
+          "name": "Mobile bookmarks",
+          "type": "folder"
+       }
+    },
+    "version": 1
+ }

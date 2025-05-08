@@ -8,25 +8,25 @@ It helps you prepare your environment, launch browsers with fresh temporary prof
 
 ## Core Features (MVP & Planned)
 
-*   **Isolated Browser Sessions:**
-    *   Launch Firefox or Chrome/Chromium with a **new, temporary profile** that is deleted upon closing.
-    *   (Planned) Option to use/manage **persistent isolated profiles** for longer-term investigations.
-*   **OPSEC Checks:**
-    *   Display current public IP address and basic geolocation.
-    *   Show currently configured system DNS servers.
-    *   (Planned) DNS leak testing.
-    *   (Planned) User-Agent management/randomization reminders.
-*   **Session Management:**
-    *   Interactive CLI for session setup.
-    *   (Planned) "Quick mode" for fast default startups.
-    *   (Planned) Customizable bookmark sets for different investigation types.
-*   **Cleanup:**
-    *   Automatic deletion of temporary browser profiles.
-    *   (Planned) Optional system-level cleanup (temp files, cache).
-*   **Metadata Handling:**
-    *   (Planned) Read and strip metadata from files.
-*   **(Vision) Integration with Sock Spy:**
-    *   (Planned) Ability to load data from Sock Spy profiles to inform session setup.
+- **Isolated Browser Sessions:**
+  - Launch Firefox or Chrome/Chromium with a **new, temporary profile** that is deleted upon closing.
+  - (Planned) Option to use/manage **persistent isolated profiles** for longer-term investigations.
+- **OPSEC Checks:**
+  - Display current public IP address and basic geolocation.
+  - Show currently configured system DNS servers.
+  - (Planned) DNS leak testing.
+  - (Planned) User-Agent management/randomization reminders.
+- **Session Management:**
+  - Interactive CLI for session setup.
+  - (Planned) "Quick mode" for fast default startups.
+  - (Planned) Customizable bookmark sets for different investigation types.
+- **Cleanup:**
+  - Automatic deletion of temporary browser profiles.
+  - (Planned) Optional system-level cleanup (temp files, cache).
+- **Metadata Handling:**
+  - (Planned) Read and strip metadata from files.
+- **(Vision) Integration with Sock Spy:**
+  - (Planned) Ability to load data from Sock Spy profiles to inform session setup.
 
 ## Why Guardian Spy?
 

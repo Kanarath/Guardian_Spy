@@ -1,3 +1,18 @@
+# Copyright (C) 2025 Kanarath.
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 # guardian_spy/browser_manager.py
 import subprocess
 import platform
@@ -5,14 +20,9 @@ import os
 import shutil
 import tempfile
 import time
-# No need to import Console here if passed as an argument
+import json # For loading/saving Chrome bookmarks if we get more advanced
 
-# Default profile directory names used by browsers (less relevant for temp profiles in system temp dir)
-# FIREFOX_PROFILE_DIR_NAME = ".mozilla/firefox" 
-# CHROME_PROFILE_DIR_NAME_LINUX = ".config/google-chrome" 
-# CHROME_PROFILE_DIR_NAME_MACOS = "Library/Application Support/Google/Chrome"
-# CHROME_PROFILE_DIR_NAME_WINDOWS = "AppData/Local/Google/Chrome/User Data"
-
+# --- (get_os_specific_browser_path - sin cambios respecto a la última versión) ---
 def get_os_specific_browser_path(browser_type, specific_name=None):
     """
     Gets the typical executable name or path for a browser based on OS.
@@ -33,8 +43,6 @@ def get_os_specific_browser_path(browser_type, specific_name=None):
 
     if browser_type == "firefox":
         if system == "Windows":
-            # Common paths, shutil.which will check PATH too if these fail
-            # Using raw strings for paths
             possible_paths = [
                 r"C:\Program Files\Mozilla Firefox\firefox.exe",
                 r"C:\Program Files (x86)\Mozilla Firefox\firefox.exe"
@@ -42,16 +50,16 @@ def get_os_specific_browser_path(browser_type, specific_name=None):
             for path in possible_paths:
                 if os.path.exists(path):
                     return path
-            return "firefox.exe" # Fallback to PATH
-        elif system == "Darwin": # macOS
+            return "firefox.exe" 
+        elif system == "Darwin": 
             path = "/Applications/Firefox.app/Contents/MacOS/firefox"
             if os.path.exists(path):
                 return path
-            return "firefox" # Fallback for custom installs or if not in default location
-        else: # Linux, BSD, etc.
-            return "firefox" # Assumes it's in PATH
+            return "firefox" 
+        else: 
+            return "firefox"
 
-    elif browser_type == "chrome": # This implies Google Chrome primarily
+    elif browser_type == "chrome": 
         if system == "Windows":
             possible_paths = [
                 r"C:\Program Files\Google\Chrome\Application\chrome.exe",
@@ -65,35 +73,86 @@ def get_os_specific_browser_path(browser_type, specific_name=None):
             path = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
             if os.path.exists(path):
                 return path
-            return "Google Chrome" # Fallback to PATH (name might vary slightly)
-        else: # Linux
-            return "google-chrome" # Common name for Google Chrome package
+            return "Google Chrome" 
+        else: 
+            return "google-chrome"
 
-    elif browser_type == "chromium": # For explicitly requesting Chromium
+    elif browser_type == "chromium": 
         if system == "Windows":
-            # Chromium doesn't have a standard installer as much, often portable or custom builds
-            # Suggest common names, user might need to ensure it's in PATH
-            return "chrome.exe" # Often Chromium builds use 'chrome.exe' too
+            return "chrome.exe" 
         elif system == "Darwin":
-            # Similar to Windows, less standard install path
-            # return "/Applications/Chromium.app/Contents/MacOS/Chromium" # A common community build path
-            return "Chromium" # Name if installed via Homebrew cask or similar
-        else: # Linux
-            # Could be 'chromium-browser' or 'chromium'
-            return "chromium-browser" # Debian/Ubuntu often use this
-            # 'chromium' is used by Arch and others. check_browser_executables will try both.
-
+            return "Chromium" 
+        else: 
+            return "chromium-browser" 
     return None
 
+# --- (load_bookmarks_to_profile - NUEVA y MODIFICADA) ---
+def load_bookmarks_to_profile(browser_type, profile_path, bookmarks_template_name, console=None):
+    """
+    Copies a predefined bookmarks file to the browser profile.
 
-def create_profile(browser_type, profile_name_prefix="gs_temp_profile", bookmarks_file=None, console=None):
+    Args:
+        browser_type (str): "firefox", "chrome", or "chromium".
+        profile_path (str): Path to the profile directory.
+        bookmarks_template_name (str): Name of the template (e.g., "default").
+                                      Expects files like assets/default_bookmarks_chrome.json
+        console (rich.console.Console, optional): For logging.
+
+    Returns:
+        bool: True if successful, False otherwise.
+    """
+    # Determine template file path - assumes 'assets' dir is relative to script execution or a known base path
+    # For robustness, construct path from this script's location or a passed-in assets_dir
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) # Goes up to guardian-spy project root
+    assets_dir = os.path.join(base_dir, "assets")
+
+    source_bookmarks_file = None
+    dest_bookmarks_path = None
+
+    if browser_type in ["chrome", "chromium"]:
+        source_bookmarks_file = os.path.join(assets_dir, f"{bookmarks_template_name}_bookmarks_chrome.json")
+        # Chrome bookmarks are in a 'Bookmarks' file in the Default profile dir (or first profile dir)
+        # The profile_path IS the user-data-dir. Chrome creates 'Default' inside it.
+        default_profile_dir = os.path.join(profile_path, "Default")
+        os.makedirs(default_profile_dir, exist_ok=True) # Ensure 'Default' directory exists
+        dest_bookmarks_path = os.path.join(default_profile_dir, "Bookmarks")
+    elif browser_type == "firefox":
+        source_bookmarks_file = os.path.join(assets_dir, f"{bookmarks_template_name}_bookmarks_firefox.html")
+        # For Firefox, we copy the HTML file into the profile root.
+        # User imports it manually. places.sqlite is too complex for MVP.
+        dest_bookmarks_path = os.path.join(profile_path, "bookmarks_to_import.html") # Give it a clear name
+    else:
+        if console:
+            console.log(f"[yellow]Bookmarks loading not supported for browser type: {browser_type}[/yellow]")
+        return False
+
+    if not os.path.exists(source_bookmarks_file):
+        if console:
+            console.log(f"[bold red]Bookmarks template file not found: {source_bookmarks_file}[/bold red]")
+        return False
+
+    try:
+        shutil.copy(source_bookmarks_file, dest_bookmarks_path)
+        if console:
+            console.log(f"Copied bookmarks template to [cyan]{dest_bookmarks_path}[/cyan]")
+        if browser_type == "firefox" and console:
+            console.log("[yellow]For Firefox, please import '[italic]bookmarks_to_import.html[/italic]' manually from the Bookmarks Manager (Ctrl+Shift+O).[/yellow]")
+        return True
+    except Exception as e:
+        if console:
+            console.log(f"[bold red]Error copying bookmarks template: {e}[/bold red]")
+        return False
+
+# --- (create_profile - MODIFICADA para llamar a load_bookmarks) ---
+def create_profile(browser_type, profile_name_prefix="gs_temp_profile", bookmarks_template_name=None, console=None):
     """
     Creates a new, isolated browser profile directory in the system's temporary location.
+    Optionally loads bookmarks.
 
     Args:
         browser_type (str): "firefox" or "chrome" (or "chromium").
         profile_name_prefix (str): Prefix for the temporary profile directory.
-        bookmarks_file (str, optional): Path to a bookmarks file to import.
+        bookmarks_template_name (str, optional): Name of the bookmarks template to load (e.g., "default").
         console (rich.console.Console, optional): For logging.
 
     Returns:
@@ -116,20 +175,12 @@ def create_profile(browser_type, profile_name_prefix="gs_temp_profile", bookmark
         if console:
             console.log(f"Creating new profile for {browser_type} at: {profile_path}")
 
-        # Browser specific initialization if needed (e.g. creating subdirs for Chrome)
-        if browser_type in ["chrome", "chromium"]:
-            # Chrome expects certain subdirectories like 'Default' for some things,
-            # but --user-data-dir should create what it needs.
-            # For bookmarks, we'd place them in profile_path/Default/Bookmarks
-            pass
-        elif browser_type == "firefox":
-            # Firefox will initialize the profile structure when launched with -profile.
-            pass
+        # Load bookmarks if requested
+        if bookmarks_template_name:
+            if console:
+                console.log(f"Attempting to load '{bookmarks_template_name}' bookmarks...")
+            load_bookmarks_to_profile(browser_type, profile_path, bookmarks_template_name, console=console)
         
-        # TODO: Implement bookmark loading if bookmarks_file is provided
-        # if bookmarks_file:
-        #    load_bookmarks_to_profile(browser_type, profile_path, bookmarks_file, console=console)
-
         return profile_path
 
     except Exception as e:
@@ -143,23 +194,10 @@ def create_profile(browser_type, profile_name_prefix="gs_temp_profile", bookmark
                     console.log(f"[bold red]Error cleaning up partially created profile {profile_path}: {e_cleanup}[/bold red]")
         return None
 
-
+# --- (launch_browser_with_profile - sin cambios respecto a la última versión) ---
 def launch_browser_with_profile(browser_type_requested, profile_path, console=None):
-    """
-    Launches the specified browser with the given profile.
-    It will try to find the actual executable path.
+    from .utils import find_executable 
 
-    Args:
-        browser_type_requested (str): "firefox", "chrome", or "chromium".
-        profile_path (str): Path to the profile directory.
-        console (rich.console.Console, optional): For logging.
-
-    Returns:
-        subprocess.Popen object or None on failure.
-    """
-    from .utils import find_executable # Local import
-
-    # Determine the actual browser type and executable based on what was found
     actual_browser_type = browser_type_requested
     browser_executable = None
 
@@ -170,15 +208,14 @@ def launch_browser_with_profile(browser_type_requested, profile_path, console=No
         else:
             browser_executable = find_executable(path_suggestion)
     
-    elif browser_type_requested == "chrome": # User selected "chrome"
-        # Try Google Chrome first
+    elif browser_type_requested == "chrome": 
         path_suggestion_gc = get_os_specific_browser_path("chrome")
         if os.path.isabs(path_suggestion_gc) and os.path.exists(path_suggestion_gc):
             browser_executable = path_suggestion_gc
         else:
             browser_executable = find_executable(path_suggestion_gc)
         
-        if not browser_executable and platform.system() == "Linux": # If Google Chrome not found on Linux, try Chromium
+        if not browser_executable and platform.system() == "Linux": 
             if console:
                 console.log("[yellow]Google Chrome not found, trying Chromium as fallback for 'chrome' selection.[/yellow]")
             chromium_names = ["chromium-browser", "chromium"]
@@ -186,17 +223,32 @@ def launch_browser_with_profile(browser_type_requested, profile_path, console=No
                 path_suggestion_cr = get_os_specific_browser_path("chromium", specific_name=name)
                 browser_executable = find_executable(path_suggestion_cr)
                 if browser_executable:
-                    actual_browser_type = "chromium" # Update actual type
+                    actual_browser_type = "chromium" 
                     break
     
-    elif browser_type_requested == "chromium": # User explicitly selected "chromium"
-        chromium_names = ["chromium-browser", "chromium"] if platform.system() == "Linux" else [get_os_specific_browser_path("chromium")]
-        for name in chromium_names:
+    elif browser_type_requested == "chromium": 
+        chromium_names_to_try = []
+        if platform.system() == "Linux":
+            chromium_names_to_try = ["chromium-browser", "chromium"]
+        else:
+            # For Win/Mac, get_os_specific_browser_path("chromium") returns one suggestion
+            suggestion = get_os_specific_browser_path("chromium")
+            if suggestion:
+                chromium_names_to_try.append(suggestion)
+
+        for name in chromium_names_to_try:
+            # If get_os_specific_browser_path already gives a specific name for non-Linux chromium,
+            # we don't need to pass specific_name again unless it's for Linux variants.
             path_suggestion_cr = get_os_specific_browser_path("chromium", specific_name=name if platform.system() == "Linux" else None)
-            browser_executable = find_executable(path_suggestion_cr)
+            if os.path.isabs(path_suggestion_cr) and os.path.exists(path_suggestion_cr): # if full path suggested
+                 browser_executable = path_suggestion_cr
+            else: # if just a name
+                 browser_executable = find_executable(path_suggestion_cr)
+
             if browser_executable:
                 actual_browser_type = "chromium"
                 break
+
 
     if not browser_executable:
         if console:
@@ -208,8 +260,6 @@ def launch_browser_with_profile(browser_type_requested, profile_path, console=No
         cmd = [browser_executable, "-profile", profile_path, "-new-instance", "-no-remote"]
     elif actual_browser_type in ["chrome", "chromium"]:
         cmd = [browser_executable, f"--user-data-dir={profile_path}", "--no-first-run", "--no-default-browser-check"]
-        # Consider adding --disable-extensions if you want a truly clean slate unless user loads some.
-        # Consider --incognito as an alternative for Chrome if not managing full profiles, but user-data-dir is better for isolation.
     
     if not cmd:
         if console:
@@ -219,12 +269,9 @@ def launch_browser_with_profile(browser_type_requested, profile_path, console=No
     try:
         if console:
             console.log(f"Executing: {' '.join(cmd)}")
-        # On Windows, Popen might need shell=True if paths have spaces and are not perfectly handled,
-        # but it's generally safer to avoid shell=True. Python's list of args usually handles spaces.
-        # For detached process or more control, consider creationflags on Windows (e.g., subprocess.CREATE_NEW_CONSOLE)
         process = subprocess.Popen(cmd)
         return process
-    except FileNotFoundError: # Should be caught by find_executable, but as a fallback
+    except FileNotFoundError: 
         if console:
             console.log(f"[bold red]Error: {actual_browser_type} executable not found at '{browser_executable}'. Is it in your PATH?[/bold red]")
     except Exception as e:
@@ -232,21 +279,10 @@ def launch_browser_with_profile(browser_type_requested, profile_path, console=No
             console.log(f"[bold red]Error launching {actual_browser_type}: {e}[/bold red]")
     return None
 
-
+# --- (remove_profile - sin cambios respecto a la última versión) ---
 def remove_profile(profile_path, console=None):
-    """
-    Removes the browser profile directory.
-
-    Args:
-        profile_path (str): Path to the profile directory.
-        console (rich.console.Console, optional): For logging.
-
-    Returns:
-        bool: True if successful or path doesn't exist, False on error.
-    """
     if not profile_path or not os.path.exists(profile_path):
         if console:
-            # Using print directly if it's a simple info message not part of a status
             console.print(f"  [dim]Profile path '{profile_path}' does not exist or not provided. Nothing to remove.[/dim]")
         return True
     try:
@@ -256,7 +292,3 @@ def remove_profile(profile_path, console=None):
         if console:
             console.print(f"  [bold red][!] Error removing profile directory {profile_path}: {e}[/bold red]")
         return False
-
-# TODO:
-# def load_bookmarks_to_profile(browser_type, profile_path, bookmarks_source_file, console=None):
-# ...

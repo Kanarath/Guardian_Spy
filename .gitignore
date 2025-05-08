@@ -121,3 +121,10 @@ gs_temp_profile_*/
 # OS specific
 .DS_Store
 Thumbs.db
+
+# Venvs and virtual environments
+venv/
+__pycache__/
+# ... y si la carpeta de perfiles temporales de Guardian Spy es:
+gs_temp_profile_*/
+guardian_spy_profiles/ # Para la carpeta base de perfiles en temp
