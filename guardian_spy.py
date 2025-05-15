@@ -1,18 +1,3 @@
-# Copyright (C) 2025 Kanarath.
-
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
@@ -20,76 +5,118 @@
 Guardian Spy: OPSEC Assistant for OSINT Practioners.
 Entry point for the Guardian Spy CLI application.
 """
+import sys 
+print("DEBUG: guardian_spy.py - Script started", file=sys.stderr)
 
-import sys
-import os # Needed for os.path.exists
-# subprocess is not directly needed here anymore as main_cli handles its part
-from guardian_spy import main_cli
-from guardian_spy.main_cli import console # Import the console instance
+import os 
+from datetime import datetime 
+import traceback 
+
+try:
+    print("DEBUG: guardian_spy.py - Attempting to import main_cli", file=sys.stderr)
+    from guardian_spy import main_cli 
+    print("DEBUG: guardian_spy.py - main_cli imported", file=sys.stderr)
+    try:
+        print("DEBUG: guardian_spy.py - Attempting to import console from main_cli", file=sys.stderr)
+        # Acceder a la consola de main_cli de forma segura
+        console_instance = getattr(main_cli, 'console', None)
+        print(f"DEBUG: guardian_spy.py - console from main_cli is {'present' if console_instance else 'None'}", file=sys.stderr)
+    except ImportError: 
+        print("DEBUG: guardian_spy.py - Failed to import console from main_cli during initial import, setting to None", file=sys.stderr)
+        console_instance = None 
+except ImportError as e_import_main:
+    print(f"FATAL ERROR: Could not import main application module (main_cli.py): {e_import_main}", file=sys.stderr)
+    traceback.print_exc()
+    sys.exit(1)
+
+print("DEBUG: guardian_spy.py - Attempting to import DEBUG_MODE", file=sys.stderr)
+from guardian_spy import DEBUG_MODE 
+print(f"DEBUG: guardian_spy.py - DEBUG_MODE is {DEBUG_MODE}", file=sys.stderr)
 
 if __name__ == "__main__":
-    profile_to_clean_on_exit = None
-    is_temp_profile_on_exit = False
+    print("DEBUG: guardian_spy.py - Entered __main__ block", file=sys.stderr)
+    
+    # Usar console_instance que obtuvimos arriba de forma segura
+    cli_console = console_instance 
+
+    def _minimal_banner_for_error(): # Banner simple si Rich falla o no está listo
+        print("="*40, file=sys.stderr)
+        print(" GUARDIAN SPY - ERROR ".center(40, "="), file=sys.stderr)
+        print("="*40, file=sys.stderr)
 
     try:
-        main_cli.start()
-        # After main_cli.start() finishes normally, capture profile info for final cleanup if needed
-        # This is more for unexpected exits after start() but before finally.
-        # Normal cleanup is handled within start() or its own try/except/finally for browser ops.
-        if hasattr(main_cli, 'SESSION_CONFIG'):
-             profile_to_clean_on_exit = main_cli.SESSION_CONFIG.get("profile_path")
-             is_temp_profile_on_exit = main_cli.SESSION_CONFIG.get("is_temp_profile", False)
+        print("DEBUG: guardian_spy.py - About to call main_cli.start()", file=sys.stderr)
+        main_cli.start() 
+        print("DEBUG: guardian_spy.py - Returned from main_cli.start() (Program should have exited via sys.exit within main_cli)", file=sys.stderr)
 
     except KeyboardInterrupt:
-        console.print("\n[bold yellow]Guardian Spy session terminated by user (main level).[/bold yellow]")
-        
-        # Attempt to clean up profile if it was created and the session was interrupted
-        # Check if SESSION_CONFIG exists and has the required keys
-        if hasattr(main_cli, 'SESSION_CONFIG'):
-            profile_to_clean = main_cli.SESSION_CONFIG.get("profile_path")
-            is_temp = main_cli.SESSION_CONFIG.get("is_temp_profile", False) # Default to False if key missing
-
-            if is_temp and profile_to_clean and os.path.exists(profile_to_clean):
-                console.print(f"[bold blue]Ensuring cleanup of temporary profile due to interruption: {profile_to_clean}[/bold blue]")
-                # Ensure browser_manager is available for cleanup
-                if hasattr(main_cli, 'browser_manager'):
-                    if main_cli.browser_manager.remove_profile(profile_to_clean, console=console):
-                        console.print("  [green][*] Temporary profile successfully removed during interrupt cleanup.[/green]")
-                    else:
-                        console.print(f"  [bold red][!] Failed to remove temporary profile during interrupt cleanup.[/bold red]")
-                else:
-                    console.print("[yellow]Could not access browser_manager for cleanup. Manual removal might be needed.[/yellow]")
-            elif profile_to_clean:
-                console.print(f"[dim]Profile at {profile_to_clean} was not temporary or path no longer exists. No cleanup action taken here.[/dim]")
+        if cli_console and hasattr(cli_console, 'print'):
+            if hasattr(cli_console, 'clear'): cli_console.clear()
+            if hasattr(main_cli, 'display_banner_kis'): main_cli.display_banner_kis() # Intentar mostrar banner si está disponible
+            cli_console.print("\n[bold yellow]Guardian Spy session terminated by user.[/bold yellow]")
         else:
-            console.print("[dim]Session configuration not available for interrupt cleanup (likely interrupted very early).[/dim]")
-                
+            print("\nGuardian Spy session terminated by user.", file=sys.stderr)
+        
+        try:
+            if hasattr(main_cli, 'CURRENT_SESSION_SETUP') and \
+               main_cli.CURRENT_SESSION_SETUP.get("is_temp_profile") and \
+               main_cli.CURRENT_SESSION_SETUP.get("browser_profile_on_disk_path") and \
+               os.path.exists(main_cli.CURRENT_SESSION_SETUP["browser_profile_on_disk_path"]):
+                profile_to_clean = main_cli.CURRENT_SESSION_SETUP["browser_profile_on_disk_path"]
+                print(f"[Cleanup] Attempting final cleanup of: {profile_to_clean}", file=sys.stderr)
+                if hasattr(main_cli, 'browser_manager'):
+                    main_cli.browser_manager.remove_profile(profile_to_clean, console=cli_console)
+        except Exception as e_final_cleanup:
+            if DEBUG_MODE: print(f"[Debug] Error during final KbdInterrupt cleanup: {e_final_cleanup}", file=sys.stderr)
+        sys.exit(130) 
+
+    except SystemExit as e_sys_exit:
+        print(f"DEBUG: guardian_spy.py - Caught SystemExit with code: {e_sys_exit.code}", file=sys.stderr)
+        # El mensaje de "Exiting" se manejará en finally si es necesario, o el programa simplemente saldrá.
+        sys.exit(e_sys_exit.code if e_sys_exit.code is not None else 0)
+
     except Exception as e:
-        console.print(f"[bold red]An unexpected error occurred in Guardian Spy main execution:[/bold red]")
-        # Use this for detailed debugging:
-        # console.print_exception(show_locals=True, word_wrap=True) 
-        # Use this for a cleaner error message in "production":
-        console.print(f"[italic red]{type(e).__name__}: {e}[/italic red]")
-        import traceback
-        console.print(f"[dim]{traceback.format_exc()}[/dim]") # Print minimal traceback for context
+        print("DEBUG: guardian_spy.py - Caught top-level Exception", file=sys.stderr)
+        error_log_path = os.path.join(os.path.expanduser("~"), "guardian_spy_crash.log")
+        timestamp_err = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        log_msg_written = False
+        try:
+            with open(error_log_path, "a", encoding="utf-8") as f:
+                f.write(f"\n--- CRASH AT {timestamp_err} ---\n")
+                traceback.print_exc(file=f)
+            log_msg = f"Crash details logged to: {error_log_path}"
+            log_msg_written = True
+        except Exception as log_e:
+            log_msg = f"Failed to write crash log: {log_e}"
+        
+        _minimal_banner_for_error() # Banner simple para errores
+        
+        if cli_console and hasattr(cli_console, 'print_exception') and DEBUG_MODE:
+            cli_console.print(f"[bold red]\nCRITICAL ERROR:[/bold red]")
+            cli_console.print_exception(show_locals=True, word_wrap=True, max_frames=10)
+        elif cli_console and hasattr(cli_console, 'print'):
+            cli_console.print(f"[bold red]\nCRITICAL ERROR.[/bold red]")
+            cli_console.print(f"[yellow]Type:[/yellow] {type(e).__name__}")
+            cli_console.print(f"[yellow]Msg:[/yellow] {str(e)[:500]}")
+        else: 
+            print(f"\nCRITICAL ERROR: {type(e).__name__}: {e}", file=sys.stderr)
+            traceback.print_exc() 
+        
+        if cli_console and hasattr(cli_console, 'print'):
+            if log_msg_written: cli_console.print(f"\n[bold]Log:[/bold] [cyan]{error_log_path}[/cyan]")
+            else: cli_console.print(f"\n[bold red]{log_msg}[/bold red]")
+            if not DEBUG_MODE: cli_console.print("\n[italic]Set DEBUG_MODE=True in __init__.py for more console output.[/italic]")
+            cli_console.input("Press Enter to exit...") # Pausar para ver el error
+        else:
+            print(log_msg, file=sys.stderr)
+            input("Press Enter to exit...")
+        sys.exit(1)
 
     finally:
-        # This 'finally' block will run regardless of how the 'try' block exits (normal, exception, interrupt)
-        # However, if KeyboardInterrupt occurs, its own cleanup runs first.
-        # This is a last-resort cleanup for profiles if main_cli.start() was running and exited unexpectedly
-        # without its own cleanup completing, and profile_to_clean_on_exit was set.
-        if is_temp_profile_on_exit and profile_to_clean_on_exit and os.path.exists(profile_to_clean_on_exit):
-            # Check if it wasn't already cleaned by an interrupt handler or normal flow within main_cli.start()
-            # This check might be complex. For simplicity, we can just try to remove again.
-            # shutil.rmtree is idempotent in the sense that if the path doesn't exist, it won't error hard.
-            # browser_manager.remove_profile handles non-existence gracefully.
-            console.print(f"\n[bold blue]Performing final check for temporary profile cleanup: {profile_to_clean_on_exit}[/bold blue]")
-            if hasattr(main_cli, 'browser_manager'):
-                 if main_cli.browser_manager.remove_profile(profile_to_clean_on_exit, console=console):
-                    console.print("  [green][*] Temporary profile confirmed clean or was removed in final check.[/green]")
-            else:
-                console.print("[yellow]Could not access browser_manager for final cleanup check.[/yellow]")
-
-
-        console.print("\n[bold blue]Exiting Guardian Spy.[/bold blue]")
-        sys.exit(0)
+        print("DEBUG: guardian_spy.py - Entering guardian_spy.py finally block", file=sys.stderr)
+        # El mensaje de "Exiting" se imprime desde main_cli o aquí si hay un error muy temprano
+        # No imprimir doble si ya se salió con sys.exit()
+        # Este finally se ejecuta incluso después de sys.exit() en algunos casos,
+        # por lo que es mejor manejar los mensajes de salida dentro de los bloques try/except.
+        # print("\nGuardian Spy is exiting (from guardian_spy.py finally).", file=sys.stderr)
+        pass # Dejar que el flujo de salida natural o sys.exit() manejen el final.

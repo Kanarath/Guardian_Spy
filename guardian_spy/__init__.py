@@ -15,5 +15,10 @@
 
 # guardian_spy/__init__.py
 __version__ = "0.1.0-alpha"
-__author__ = "Tu Nombre/Alias"
+__author__ = "Kanarath & AI Spy"
 __app_name__ = "Guardian Spy"
+
+# --- Flag de Depuración Global ---
+# Cambia a True para ver los console.log detallados de los módulos Y MÁS TRACEBACKS.
+# En producción o uso normal, debería ser False para una UI limpia.
+DEBUG_MODE = True # <--- Poner en True para depurar el cierre
