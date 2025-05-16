@@ -4,6 +4,7 @@ import sys
 import time 
 import os 
 from datetime import datetime 
+from typing import List, Dict, Optional, Union, Any # ASEGURARSE DE QUE ESTÉ ESTA LÍNEA
 
 from rich.console import Console
 from rich.panel import Panel
@@ -15,16 +16,15 @@ from rich.align import Align
 from rich.box import SIMPLE_HEAVY
 
 try:
-    from . import browser_manager
-    from . import network_checker
-    from . import utils 
-    from . import config_manager 
+    from . import browser_manager, network_checker, utils, config_manager, bookmarks_handler 
     from . import __version__, __app_name__ 
     from guardian_spy import DEBUG_MODE
 except ImportError:
-    import browser_manager, network_checker, utils, config_manager
+    # Fallback para ejecución directa (menos ideal)
+    import browser_manager, network_checker, utils, config_manager, bookmarks_handler
     try: from __init__ import __version__, __app_name__, DEBUG_MODE
     except ImportError: __version__ = "0.0.0e"; __app_name__ = "GS(Error)"; DEBUG_MODE = True
+
 
 console = Console(force_terminal=True) 
 
@@ -32,7 +32,7 @@ CURRENT_SESSION_SETUP = {
     "profile_type": "Temporary", 
     "gs_profile_name": None,     
     "browser_selected": None,    
-    "bookmarks_set": "default", 
+    "bookmarks_set": None, 
     "network_checks_status": "Pending", 
     "browser_profile_on_disk_path": None, 
 }
@@ -115,7 +115,18 @@ def display_session_status_sequential():
     console.print(pt_display)
     bs_display = f"  Browser: [magenta]{CURRENT_SESSION_SETUP['browser_selected'] or '[Not Selected]'}[/magenta]"
     console.print(bs_display)
-    bms_display = f"  Bookmarks Set: [yellow]{CURRENT_SESSION_SETUP['bookmarks_set'] or 'None'}[/yellow]"
+    bookmarks_identifier = CURRENT_SESSION_SETUP["bookmarks_set"]
+    bookmarks_display_name = "None"
+    if bookmarks_identifier == "__ALL__": bookmarks_display_name = "All Sets"
+    elif bookmarks_identifier == "__GENERAL__": bookmarks_display_name = "General OSINT Set"
+    elif isinstance(bookmarks_identifier, list):
+        if bookmarks_identifier:
+            friendly_names = [fn.replace(".json","").replace("_"," ").title() for fn in bookmarks_identifier]
+            bookmarks_display_name = ", ".join(friendly_names);
+            if len(bookmarks_display_name) > 50: bookmarks_display_name = f"{len(bookmarks_identifier)} sets selected"
+        else: bookmarks_display_name = "None (empty selection)"
+    elif isinstance(bookmarks_identifier, str): bookmarks_display_name = bookmarks_identifier.replace(".json","").replace("_"," ").title()
+    bms_display = f"  Bookmarks Set: [yellow]{bookmarks_display_name}[/yellow]"
     console.print(bms_display)
     ncs = CURRENT_SESSION_SETUP['network_checks_status']
     nc_color = "yellow"; 
@@ -129,13 +140,13 @@ def display_command_menu_sequential():
     console.print(Rule("[bold_yellow]Available Commands[/bold_yellow]", style="yellow"))
     commands = {
         "setup": "Configure current session (profile, browser, bookmarks)",
+        "bookmarks": "Select bookmark set(s) for the current session", # NUEVO COMANDO
         "check": "Perform network & browser checks",
         "launch": "Launch browser with current session setup",
-        "profiles": "Manage persistent profiles (list, create, delete, load)",
-        "status": "Show current session setup summary",
+        "profiles": "Manage persistent profiles",
+        "status": "Show current session setup",
         "about": "Show information about Guardian Spy",
-        "help": "Show this command menu again", # Comando HELP
-        # "clear": "Clear the screen and show initial display", # Comando CLEAR eliminado
+        "help": "Show this command menu again", 
         "quit": "Exit Guardian Spy"
     }
     for cmd, desc in commands.items():
@@ -146,7 +157,6 @@ def initial_checks_display_sequential():
     nc_console = console if DEBUG_MODE else None
     public_ip, ip_info = None, None
     console.print("[+] Performing OPSEC network checks...")
-    # CORRECCIÓN: Quitar console=console de console.status
     with console.status("[spinner.dots]Checking network...", spinner_style="blue"):
         try: public_ip, ip_info = network_checker.get_public_ip_info(console=nc_console)
         except: pass 
@@ -159,9 +169,7 @@ def initial_checks_display_sequential():
         else: ip_display.append("\n      [dim]Could not retrieve detailed IP geolocation.[/dim]")
         console.print(Panel(ip_display, title="Public IP", border_style="green", expand=False))
     else: console.print(Panel(Text("  [!] Could not retrieve public IP address.",style="bold red"),title="Public IP", border_style="red"))
-    
     dns_servers = []
-    # CORRECCIÓN: Quitar console=console de console.status
     with console.status("[spinner.dots]Checking DNS...", spinner_style="blue"):
         try: dns_servers = network_checker.get_dns_servers(console=nc_console)
         except: pass
@@ -202,13 +210,11 @@ def start_session_flow_sequential(browser_choice, profile_path, is_temp_profile,
     else: console_obj.print("    [italic]This is a persistent profile.[/italic]")
     
     browser_process = None
-    # CORRECCIÓN: Quitar console=console_obj de console_obj.status
     with console_obj.status(f"[spinner.dots]Waiting for {browser_choice.capitalize()} to launch...", spinner_style="blue"):
         browser_process = browser_manager.launch_browser_with_profile(browser_type_requested=browser_choice, profile_path=profile_path, console=console_obj)
         if browser_process: time.sleep(1) 
 
     if browser_process:
-        # --- Mostrar Escudo ASCII Estático ---
         console_obj.line() 
         console_obj.print(Text.from_markup(LAUNCH_ACTIVE_SHIELD_ASCII)) 
         console_obj.print(Align.center(Text.from_markup(f"[bold green]Guardian Spy Shield ACTIVE[/bold green] - Browser: [magenta]{browser_choice.capitalize()}[/magenta]")))
@@ -217,16 +223,12 @@ def start_session_flow_sequential(browser_choice, profile_path, is_temp_profile,
         
         session_interrupted_by_user = False
         try:
-            while browser_process.poll() is None:
-                time.sleep(0.5) 
+            while browser_process.poll() is None: time.sleep(0.5) 
         except KeyboardInterrupt:
             session_interrupted_by_user = True
-            # Imprimir en una nueva línea, el escudo ya no se ve porque la terminal hizo scroll o se interrumpió
             console_obj.print(f"\n[yellow][!] Browser session wait interrupted by user.[/yellow]") 
         
-        # No limpiar pantalla aquí. Los mensajes de salida se añaden debajo.
-        # display_initial_banner_and_app_info() # No mostrar banner aquí
-
+        # No limpiar pantalla aquí.
         if session_interrupted_by_user:
             console_obj.print(f"\n[yellow][!] Terminating browser due to interruption...[/yellow]")
             browser_process.terminate()
@@ -253,6 +255,56 @@ def start_session_flow_sequential(browser_choice, profile_path, is_temp_profile,
     Prompt.ask("Press Enter to continue...", console=console, default="", show_default=False)
     print("DEBUG: start_session_flow_sequential - AFTER Prompt 'Press Enter to continue'", file=sys.stderr) 
 
+def _get_bookmark_selection_from_user(current_set_identifier: Union[str, List[str], None]) -> Union[str, List[str], None]:
+    console.print(Rule("[blue]Bookmarks Configuration[/blue]", style="blue"))
+    current_display = "None"
+    if current_set_identifier == "__ALL__": current_display = "All Sets"
+    elif current_set_identifier == "__GENERAL__": current_display = "General OSINT Set"
+    elif isinstance(current_set_identifier, list):
+        if current_set_identifier:
+            fns = [fn.replace(".json","").replace("_"," ").title() for fn in current_set_identifier]
+            current_display = ", ".join(fns);
+            if len(current_display) > 40: current_display = f"{len(current_set_identifier)} specific sets"
+        else: current_display = "None (empty selection)"
+    elif isinstance(current_set_identifier, str): current_display = current_set_identifier.replace(".json","").replace("_"," ").title()
+    console.print(f"Current Bookmarks selection: [yellow]{current_display}[/yellow]")
+    console.print("Choose an option for bookmarks:")
+    console.print("  [cyan]1[/cyan]. Load [bold]ALL[/bold] available bookmark sets")
+    console.print("  [cyan]2[/cyan]. Load [bold]General OSINT[/bold] bookmark set")
+    console.print("  [cyan]3[/cyan]. Select [bold]specific[/bold] bookmark sets")
+    console.print("  [cyan]4[/cyan]. Load [bold]NO[/bold] bookmarks (None)")
+    console.print("  [cyan]C[/cyan]. Cancel (keep current selection)")
+    main_choice = Prompt.ask("Select bookmark loading option or C to Cancel", choices=["1", "2", "3", "4", "c", "C"], default="c", console=console).lower()
+    if main_choice == "c": console.print("[yellow]Bookmarks selection cancelled, keeping current.[/yellow]"); return current_set_identifier
+    if main_choice == "1": return "__ALL__"
+    if main_choice == "2": return "__GENERAL__"
+    if main_choice == "4": return None
+    if main_choice == "3": 
+        available_sets = bookmarks_handler.get_available_bookmark_sets(console=console)
+        if not available_sets: console.print("[yellow]No specific bookmark sets found. Setting to None.[/yellow]"); return None
+        console.print("Available specific bookmark sets (select multiple by number, e.g., '1 3 4', or '0' for None):")
+        set_choices_map = {}; idx = 1
+        for friendly_name, filename in available_sets.items():
+            set_choices_map[str(idx)] = {"friendly": friendly_name, "file": filename}; console.print(f"  [cyan]{idx}[/cyan]. {friendly_name}"); idx +=1
+        console.print(f"  [cyan]0[/cyan]. Select None (clear specific selection)"); console.print(f"  [cyan]A[/cyan]. Select ALL specific sets listed above")
+        selected_files = []
+        while True:
+            raw_selection = Prompt.ask("Enter numbers (space-separated), 0, A, or D for Done:", console=console).lower()
+            if raw_selection == 'd': break
+            if raw_selection == 'a':
+                selected_files = [item["file"] for item in set_choices_map.values()]; console.print(f"[green]All {len(selected_files)} specific sets selected.[/green]"); break
+            if raw_selection == '0': selected_files = []; console.print("[green]No specific sets selected (None).[/green]"); break
+            current_selection_files = []; valid_input = True
+            for part in raw_selection.split():
+                if part in set_choices_map: current_selection_files.append(set_choices_map[part]["file"])
+                else: console.print(f"[red]Invalid selection: {part}. Try again or type 'd'.[/red]"); valid_input = False; break
+            if valid_input:
+                selected_files = list(set(current_selection_files)) 
+                display_selected = [s.replace(".json","").title() for s in selected_files]
+                console.print(f"Selected sets: [yellow]{', '.join(display_selected) if display_selected else 'None'}[/yellow]")
+                if Confirm.ask("Are these selections correct and final?", default=True, console=console): break
+        return selected_files if selected_files else None 
+    return current_set_identifier
 
 # --- Handlers de Comandos Secuenciales ---
 def handle_command_setup_seq(detected_browser_paths):
@@ -279,22 +331,16 @@ def handle_command_setup_seq(detected_browser_paths):
             CURRENT_SESSION_SETUP["gs_profile_name"] = f"(Mod: {CURRENT_SESSION_SETUP['gs_profile_name'] or 'Unsaved'})"
             CURRENT_SESSION_SETUP["browser_profile_on_disk_path"] = None
     console.line()
-    console.print(f"3. Bookmarks Set (Current: [yellow]{CURRENT_SESSION_SETUP['bookmarks_set'] or 'None'}[/yellow])")
-    available_sets = {"1": ("None", None), "2": ("Default OSINT", "default")}
-    console.print("Available bookmark sets:")
-    for key, (desc, _) in available_sets.items(): console.print(f"  [cyan]{key}[/cyan]. {desc}")
-    console.print(f"  [cyan]C[/cyan]. Cancel (keep current)")
-    current_bm_val = CURRENT_SESSION_SETUP["bookmarks_set"]
-    default_key_choice = next((k for k, (_,v) in available_sets.items() if v == current_bm_val), "c")
-    prompt_choices_bm = list(available_sets.keys()) + ["c", "C"]
-    bm_choice_key = Prompt.ask("Select bookmarks set number or C to Cancel:", choices=prompt_choices_bm, default=default_key_choice, console=console).upper()
-    if bm_choice_key != "C":
-        _, internal_value = available_sets.get(bm_choice_key, (None,None))
-        if internal_value is not None or bm_choice_key == "1": 
-            CURRENT_SESSION_SETUP["bookmarks_set"] = internal_value
-            console.print(f"Bookmarks set to: [yellow]{ (internal_value or 'None').capitalize() }[/yellow]")
+    # Llamar a la función de selección de bookmarks aquí
+    CURRENT_SESSION_SETUP["bookmarks_set"] = _get_bookmark_selection_from_user(CURRENT_SESSION_SETUP["bookmarks_set"])
     console.print(Rule("Setup Configuration Complete", style="green"))
     display_session_status_sequential()
+
+def handle_command_bookmarks_seq(): # Nuevo handler para el comando 'bookmarks'
+    CURRENT_SESSION_SETUP["bookmarks_set"] = _get_bookmark_selection_from_user(CURRENT_SESSION_SETUP["bookmarks_set"])
+    console.line()
+    display_session_status_sequential() # Mostrar estado actualizado
+
 
 def handle_command_check_seq():
     console.print(Rule("[green]Network & Browser Checks[/green]", style="green"))
@@ -313,9 +359,38 @@ def handle_command_launch_seq(detected_browser_paths):
     console.print(Rule("[green]Launch Session[/green]", style="green"))
     if not CURRENT_SESSION_SETUP["browser_selected"]:
         console.print("[yellow]No browser selected. Please run 'setup' command first.[/yellow]"); return
+
+    console.line()
+    bookmarks_identifier_for_this_launch = CURRENT_SESSION_SETUP["bookmarks_set"] 
+    current_set_file_launch = bookmarks_identifier_for_this_launch 
+    current_set_display_launch = "None" 
+    if current_set_file_launch == "__ALL__": current_set_display_launch = "All Sets"
+    elif current_set_file_launch == "__GENERAL__": current_set_display_launch = "General OSINT Set"
+    elif isinstance(current_set_file_launch, list):
+        if current_set_file_launch:
+            fns_launch = [fn.replace(".json","").replace("_"," ").title() for fn in current_set_file_launch]
+            current_set_display_launch = ", ".join(fns_launch);
+            if len(current_set_display_launch) > 40: current_set_display_launch = f"{len(current_set_file_launch)} specific sets"
+        else: current_set_display_launch = "None (empty selection)"
+    elif isinstance(current_set_file_launch, str): current_set_display_launch = current_set_file_launch.replace(".json","").replace("_"," ").title()
+    console.print(f"Bookmarks for this launch: [yellow]{current_set_display_launch}[/yellow]")
+    if Confirm.ask("Change bookmarks set for THIS LAUNCH ONLY?", default=False, console=console):
+        bookmarks_identifier_for_this_launch = _get_bookmark_selection_from_user(bookmarks_identifier_for_this_launch)
+        temp_display = "None"; 
+        if bookmarks_identifier_for_this_launch == "__ALL__": temp_display = "All Sets"
+        elif bookmarks_identifier_for_this_launch == "__GENERAL__": temp_display = "General OSINT Set"
+        elif isinstance(bookmarks_identifier_for_this_launch, list):
+            if bookmarks_identifier_for_this_launch:
+                 fns_temp = [fn.replace(".json","").replace("_"," ").title() for fn in bookmarks_identifier_for_this_launch]
+                 temp_display = ", ".join(fns_temp); 
+                 if len(temp_display) > 40: temp_display = f"{len(bookmarks_identifier_for_this_launch)} specific sets"
+            else: temp_display = "None (empty selection)"
+        elif isinstance(bookmarks_identifier_for_this_launch, str): temp_display = bookmarks_identifier_for_this_launch.replace(".json","").replace("_"," ").title()
+        console.print(f"For this launch, using bookmarks: [yellow]{temp_display}[/yellow]")
+    console.line()
+
     is_temp = (CURRENT_SESSION_SETUP["profile_type"] == "Temporary")
     browser_choice = CURRENT_SESSION_SETUP["browser_selected"]
-    bookmarks_to_load = CURRENT_SESSION_SETUP["bookmarks_set"]
     gs_profile_name_for_disk = None
     if not is_temp and CURRENT_SESSION_SETUP.get("gs_profile_name") and \
        not (CURRENT_SESSION_SETUP.get("gs_profile_name") or "").startswith("(Mod"): 
@@ -333,12 +408,12 @@ def handle_command_launch_seq(detected_browser_paths):
     if should_create_browser_dir:
         profile_name_arg_for_create = gs_profile_name_for_disk if not is_temp else None
         prefix_arg_for_create = "gs_temp_browser_profile" if is_temp else None
-        # CORRECCIÓN: Quitar console=console de console.status
         with console.status(f"[spinner.dots]Creating browser profile dir...", spinner_style="blue"):
             newly_created_path = browser_manager.create_profile(
                 browser_type=browser_choice, profile_custom_name=profile_name_arg_for_create,
                 profile_name_prefix=prefix_arg_for_create, is_persistent=(not is_temp), 
-                bookmarks_template_name=bookmarks_to_load, console=console
+                bookmark_set_identifier=bookmarks_identifier_for_this_launch, 
+                console=console
             )
         if not newly_created_path: console.print(f"[red][!] Failed to create browser profile dir.[/red]"); return
         actual_browser_profile_path = newly_created_path
@@ -377,42 +452,58 @@ def handle_command_profiles_seq(detected_browser_paths):
             if not profiles_data: console.print("No persistent profiles found.")
             else:
                 table = Table(title="Available Profiles", box=SIMPLE_HEAVY, show_lines=True, header_style="bold magenta")
-                table.add_column("Name",style="cyan",min_width=15); table.add_column("Browser"); table.add_column("Bookmarks"); table.add_column("Created")
+                table.add_column("Name",style="cyan",min_width=15); table.add_column("Browser"); table.add_column("Bookmarks Set"); table.add_column("Created")
                 if DEBUG_MODE: table.add_column("Browser Dir Path", style="dim", overflow="fold")
                 valid_profiles_displayed = 0
                 for profile_item in profiles_data:
                     if not isinstance(profile_item, dict): 
-                        if DEBUG_MODE and hasattr(console, 'log'): console.log(f"[dim red]Skipping invalid profile entry: {profile_item}[/dim red]")
+                        if DEBUG_MODE and hasattr(console, 'log'): console.log(f"[dim red]Skipping invalid profile: {profile_item}[/dim red]")
                         continue
                     created_at_str = profile_item.get("created_at","N/A"); browser_profile_path_val = profile_item.get("browser_profile_path", "[Not Set]")
+                    bookmarks_identifier = profile_item.get("bookmarks_set_name")
+                    bookmarks_display_name_list = "None"
+                    if bookmarks_identifier == "__ALL__": bookmarks_display_name_list = "All Sets"
+                    elif bookmarks_identifier == "__GENERAL__": bookmarks_display_name_list = "General OSINT"
+                    elif isinstance(bookmarks_identifier, list):
+                        if bookmarks_identifier:
+                            fns_list = [fn.replace(".json","").replace("_"," ").title() for fn in bookmarks_identifier]
+                            bookmarks_display_name_list = ", ".join(fns_list)
+                            if len(bookmarks_display_name_list) > 30: bookmarks_display_name_list = f"{len(bookmarks_identifier)} specific sets"
+                        else: bookmarks_display_name_list = "None (empty specific)"
+                    elif isinstance(bookmarks_identifier, str):
+                        bookmarks_display_name_list = bookmarks_identifier.replace(".json","").replace("_"," ").title()
                     formatted_date = created_at_str
                     if created_at_str != "N/A" and "T" in created_at_str:
                         try:
                             timestamp_part = created_at_str.split('.')[0].replace('Z', '+00:00')
                             dt_obj = datetime.fromisoformat(timestamp_part); formatted_date = dt_obj.strftime("%Y-%m-%d")
                         except ValueError: formatted_date = created_at_str.split("T")[0] 
-                    row_data = [profile_item.get("profile_name", "[N/A]"), profile_item.get("browser_type","N/A").capitalize(), profile_item.get("bookmarks_set_name","None"), formatted_date]
+                    row_data = [profile_item.get("profile_name", "[N/A]"), profile_item.get("browser_type","N/A").capitalize(), bookmarks_display_name_list, formatted_date]
                     if DEBUG_MODE: row_data.append(browser_profile_path_val)
                     table.add_row(*row_data); valid_profiles_displayed += 1
                 if valid_profiles_displayed > 0: console.print(table)
                 else: console.print("No valid profiles found to display.")
             console.line()
-            # No "Press Enter" aquí, el prompt "Profile >" reaparecerá.
         elif sub_command == "create":
             console.print(Rule("[green]Create New Persistent Profile[/green]", style="green"))
             if not detected_browser_paths: console.print("[red]No browsers detected.[/red]"); console.line(); continue
             try:
                 profile_name = Prompt.ask("Enter unique name for new profile", default=f"profile_{int(time.time())%10000}")
-                if not profile_name.strip() or not profile_name.replace('_','').isalnum(): console.print("[red]Invalid name.[/red]"); console.line(); continue
+                if not profile_name.strip() or not profile_name.replace('_','').isalnum(): console.print("[red]Invalid name (alphanumeric & underscore only).[/red]"); console.line(); continue
                 if config_manager.get_profile_by_name(profile_name): console.print(f"[red]Profile '{profile_name}' exists.[/red]"); console.line(); continue
                 browser_type = select_browser_interactive_sequential(detected_browser_paths, None)
                 if not browser_type: console.line(); continue
-                bookmarks_set = "default" if Confirm.ask("Load default OSINT bookmarks?", default=True, console=console) else None
-                console.print(f"Summary - Name: [cyan]{profile_name}[/cyan], Browser: [magenta]{browser_type}[/magenta], Bookmarks: [yellow]{bookmarks_set or 'None'}[/yellow]")
+                bookmarks_set_identifier_create = _get_bookmark_selection_from_user(None) 
+                bm_display_create = "None" 
+                if bookmarks_set_identifier_create == "__ALL__": bm_display_create = "All Sets"
+                elif bookmarks_set_identifier_create == "__GENERAL__": bm_display_create = "General OSINT"
+                elif isinstance(bookmarks_set_identifier_create, list) and bookmarks_set_identifier_create: bm_display_create = f"{len(bookmarks_set_identifier_create)} specific set(s)"
+                elif isinstance(bookmarks_set_identifier_create, str): bm_display_create = bookmarks_set_identifier_create.replace('.json','').title()
+                console.print(f"Summary - Name: [cyan]{profile_name}[/cyan], Browser: [magenta]{browser_type}[/magenta], Bookmarks: [yellow]{bm_display_create}[/yellow]")
                 if not Confirm.ask("Create profile?", default=True, console=console): console.print("[yellow]Cancelled.[/yellow]"); console.line(); continue
-                browser_profile_disk_path = browser_manager.create_profile(browser_type=browser_type, profile_custom_name=profile_name, is_persistent=True, bookmarks_template_name=bookmarks_set, console=console)
+                browser_profile_disk_path = browser_manager.create_profile(browser_type=browser_type, profile_custom_name=profile_name, is_persistent=True, bookmark_set_identifier=bookmarks_set_identifier_create, console=console)
                 if not browser_profile_disk_path: console.print("[red]Failed to create browser profile directory.[/red]"); console.line(); continue
-                new_profile_data = {"profile_name": profile_name, "browser_type": browser_type, "browser_profile_path": browser_profile_disk_path, "bookmarks_set_name": bookmarks_set, "created_at": datetime.now().isoformat()}
+                new_profile_data = {"profile_name": profile_name, "browser_type": browser_type, "browser_profile_path": browser_profile_disk_path, "bookmarks_set_name": bookmarks_set_identifier_create, "created_at": datetime.now().isoformat()}
                 profiles = config_manager.load_profiles_data(); profiles.append(new_profile_data)
                 if config_manager.save_profiles_data(profiles, console=console): console.print(f"[green]Profile '[cyan]{profile_name}[/cyan]' created.[/green]")
                 else:
@@ -440,7 +531,7 @@ def handle_command_profiles_seq(detected_browser_paths):
                 if config_manager.save_profiles_data(updated_profiles, console=console):
                     console.print(f"  [green]Profile '{profile_name_to_delete}' removed from config.[/green]")
                     if CURRENT_SESSION_SETUP.get("gs_profile_name") == profile_name_to_delete:
-                        CURRENT_SESSION_SETUP.update({"profile_type": "Temporary", "gs_profile_name": None, "browser_selected": None, "bookmarks_set": "default", "browser_profile_on_disk_path": None, "network_checks_status": "Pending"})
+                        CURRENT_SESSION_SETUP.update({"profile_type": "Temporary", "gs_profile_name": None, "browser_selected": None, "bookmarks_set": None, "browser_profile_on_disk_path": None, "network_checks_status": "Pending"})
                         console.print("[yellow]Active session setup reset.[/yellow]")
             console.line()
         elif sub_command == "load":
@@ -458,12 +549,13 @@ def handle_command_profiles_seq(detected_browser_paths):
             profile_data = config_manager.get_profile_by_name(selected_profile_name)
             if profile_data:
                 CURRENT_SESSION_SETUP["profile_type"] = "Persistent"; CURRENT_SESSION_SETUP["gs_profile_name"] = profile_data["profile_name"]
-                CURRENT_SESSION_SETUP["browser_selected"] = profile_data["browser_type"]; CURRENT_SESSION_SETUP["bookmarks_set"] = profile_data.get("bookmarks_set_name")
+                CURRENT_SESSION_SETUP["browser_selected"] = profile_data["browser_type"]; CURRENT_SESSION_SETUP["bookmarks_set"] = profile_data.get("bookmarks_set_name") 
                 CURRENT_SESSION_SETUP["browser_profile_on_disk_path"] = profile_data["browser_profile_path"]; CURRENT_SESSION_SETUP["network_checks_status"] = "Pending"
                 console.print(f"[green]Profile '[cyan]{selected_profile_name}[/cyan]' loaded to current setup.[/green]")
                 console.print("[italic]Returning to main command prompt...[/italic]"); time.sleep(0.5); break 
             console.line()
         elif sub_command == "back":
+            # No console.clear() aquí, el bucle principal lo hará al volver
             break 
         else: console.print("[red]Unknown profile command.[/red]"); console.line()
 
@@ -477,14 +569,22 @@ def handle_command_about_seq():
 def main_loop_sequential(cli_args):
     detected_browser_paths = utils.check_browser_executables(console=None if not DEBUG_MODE else console) 
     if not detected_browser_paths:
-        # console.clear() # No limpiar aquí, solo imprimir error y salir
+        # console.clear() # No limpiar aquí
         display_initial_banner_and_app_info()
         console.print(Panel(Text.from_markup("[bold red]ERROR: No supported browsers found.[/bold red]"),padding=1))
         return 
     if cli_args: 
         if cli_args.browser and cli_args.browser in detected_browser_paths : CURRENT_SESSION_SETUP["browser_selected"] = cli_args.browser
         if cli_args.no_bookmarks: CURRENT_SESSION_SETUP["bookmarks_set"] = None
-        elif cli_args.bookmarks: CURRENT_SESSION_SETUP["bookmarks_set"] = cli_args.bookmarks
+        elif cli_args.bookmarks: 
+            bm_file_to_load_cli = cli_args.bookmarks
+            if bm_file_to_load_cli in ["__ALL__", "__GENERAL__"] or \
+               (isinstance(bm_file_to_load_cli, str) and hasattr(bookmarks_handler, 'BOOKMARKS_DIR') and os.path.exists(os.path.join(bookmarks_handler.BOOKMARKS_DIR, bm_file_to_load_cli))):
+                CURRENT_SESSION_SETUP["bookmarks_set"] = bm_file_to_load_cli
+            else:
+                console.print(f"[yellow]Warning: Bookmark set '{bm_file_to_load_cli}' from CLI arg not found or invalid. Using no bookmarks.[/yellow]")
+                CURRENT_SESSION_SETUP["bookmarks_set"] = None
+        # else: El default de CURRENT_SESSION_SETUP (None) se mantiene
     
     # Pantalla de bienvenida inicial
     console.clear() 
@@ -500,75 +600,79 @@ def main_loop_sequential(cli_args):
         
         print(f"DEBUG: main_loop_sequential - Command received: {command_input}", file=sys.stderr)
         
-        # La salida de cada comando se añade debajo.
-        # El comando "clear" explícito limpiará la pantalla.
-
         if command_input == "setup": handle_command_setup_seq(detected_browser_paths)
+        elif command_input == "bookmarks": handle_command_bookmarks_seq() # LLAMADA AL NUEVO HANDLER
         elif command_input == "check": handle_command_check_seq()
         elif command_input == "launch": handle_command_launch_seq(detected_browser_paths)
         elif command_input == "profiles": 
             handle_command_profiles_seq(detected_browser_paths)
-            # Después de salir de 'profiles', mostrar el menú principal de nuevo
-            console.line() 
+            # Después de salir de 'profiles', redibujar el menú principal y estado
+            display_initial_banner_and_app_info() 
             display_session_status_sequential() 
             display_command_menu_sequential()
         elif command_input == "status": 
             display_session_status_sequential()
         elif command_input == "about": 
             handle_command_about_seq()
-        elif command_input == "help": # CAMBIO: 'menu' a 'help'
+        elif command_input == "help": 
             display_command_menu_sequential()
-        elif command_input == "clear": # CAMBIO: Comando 'clear' NO se elimina
-            console.clear() 
-            display_initial_banner_and_app_info() 
-            display_session_status_sequential() 
-            display_command_menu_sequential() 
+        # elif command_input == "clear": # Comando clear eliminado
+            # console.clear() 
+            # display_initial_banner_and_app_info() 
+            # display_session_status_sequential() 
+            # display_command_menu_sequential() 
         elif command_input in ["quit", "exit", "q"]:
             if Confirm.ask("Are you sure you want to quit?", default=True, console=console):
                 console.print(Rule("[blue]Exiting Guardian Spy. Stay safe![/blue]", style="blue"))
-                sys.exit(0) # Salir directamente del programa
+                sys.exit(0) 
+            else: # Si no confirma, redibujar la pantalla principal
+                display_initial_banner_and_app_info()
+                display_session_status_sequential()
+                display_command_menu_sequential()
         elif not command_input: 
-            pass # Si solo presiona Enter, no hacer nada, el prompt reaparece
+            pass 
         else:
             console.print(f"[red]Unknown command: '{command_input}'. Type 'help' for commands.[/red]")
         
-        console.line() # Línea en blanco antes del siguiente prompt
+        console.line() 
         print("DEBUG: main_loop_sequential - End of loop iteration.", file=sys.stderr)
 
 
 def start():
+    # ... (start() como en la última versión, con la corrección del NameError)
     print("DEBUG: main_cli.py - Entered start() function", file=sys.stderr)
-    parser = argparse.ArgumentParser(add_help=False)
+    parser = argparse.ArgumentParser(add_help=False) 
     info_group = parser.add_argument_group('Informational Arguments')
     info_group.add_argument("-v", "--version", action="version", version=f"%(prog)s {__version__}")
-    info_group.add_argument("-h", "--help", action="store_true")
-    info_group.add_argument("--check-setup", action="store_true")
-    action_group = parser.add_argument_group('Session Setup Arguments')
-    action_group.add_argument("-b", "--browser", choices=['firefox', 'chrome', 'chromium'])
-    action_group.add_argument("--no-bookmarks", action="store_true")
-    action_group.add_argument("--bookmarks", help="Specify bookmarks set name.")
+    info_group.add_argument("-h", "--help", action="store_true", help="Show Guardian Spy command-line argument help and exit.")
+    info_group.add_argument("--check-setup", action="store_true", help="Perform setup checks (browsers, network) and exit.")
+    action_group = parser.add_argument_group('Session Setup Arguments (influences initial interactive state)')
+    action_group.add_argument("-b", "--browser", choices=['firefox', 'chrome', 'chromium'], help="Pre-select BROWSER for the initial session setup.")
+    action_group.add_argument("--no-bookmarks", action="store_true", help="Start with 'no bookmarks' selected in the initial session setup.")
+    action_group.add_argument("--bookmarks", metavar="SET_IDENTIFIER", help="Pre-select bookmarks. Use filename (e.g. '00_opsec.json'), '__ALL__', or '__GENERAL__'.")
     args, unknown_args = parser.parse_known_args()
     print(f"DEBUG: main_cli.py - Args parsed: {args}, Unknown: {unknown_args}", file=sys.stderr)
 
     if args.help:
         console.clear(); display_initial_banner_and_app_info() 
-        console.print(Panel(Text.from_markup("""[bold]Guardian Spy CLI Options:[/bold]..."""),padding=1))
+        parser.print_help(file=sys.stdout) 
+        console.print("\n[italic]Once Guardian Spy starts in interactive mode, type 'help' for in-app commands.[/italic]")
         sys.exit(0)
+        
     if args.check_setup:
         console.clear(); display_initial_banner_and_app_info() 
         handle_command_check_seq() 
         Prompt.ask("Press Enter to exit.", default="",show_default=False,console=console)
         sys.exit(0) 
+        
     if unknown_args:
-        console.print(f"[yellow]Warning: Unrecognized arguments: {unknown_args}. These will be ignored.[/yellow]")
-        console.print("[yellow]Please use the interactive command prompt. Type 'help' for commands.[/yellow]") # Cambiado a 'help'
-        time.sleep(2)
+        console.print(f"[yellow]Warning: Unrecognized arguments: {unknown_args}. These will be ignored at startup.[/yellow]")
+        console.print("[yellow]Starting Guardian Spy in interactive mode. Type 'help' for in-app commands.[/yellow]")
+        time.sleep(1) 
     
-    # El console.clear() principal se hace aquí, UNA VEZ al inicio del programa interactivo.
-    # console.clear() # Ya no es necesario aquí, se hace en start() o al inicio de main_loop_sequential
     print("DEBUG: main_cli.py - About to call main_loop_sequential()", file=sys.stderr)
     main_loop_sequential(args) 
-    print("DEBUG: main_cli.py - Returned from main_loop_sequential (this means quit was selected)", file=sys.stderr)
+    print("DEBUG: main_cli.py - Returned from main_loop_sequential (this means quit was selected or loop ended)", file=sys.stderr)
 
 
 if __name__ == '__main__': 

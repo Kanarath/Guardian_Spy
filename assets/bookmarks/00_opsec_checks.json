@@ -1,0 +1,6 @@
+[
+    {"name": "Whoer.net", "url": "https://whoer.net/", "description": "Check IP, DNS, User-Agent"},
+    {"name": "DNSLeakTest", "url": "https://www.dnsleaktest.com/", "description": "Test for DNS leaks"},
+    {"name": "BrowserLeaks", "url": "https://browserleaks.com/", "description": "Detailed browser fingerprint tests"},
+    {"name": "CoverYourTracks (EFF)", "url": "https://coveryourtracks.eff.org/", "description": "Test against tracking"}
+]

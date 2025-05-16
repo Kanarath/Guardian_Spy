@@ -1,64 +1,30 @@
 # guardian_spy/browser_manager.py
-import subprocess
-import platform
-import os
-import shutil
-import tempfile
-import time
-import json
-from typing import List, Dict, Optional, Union, Any # ASEGURADO
-from rich.console import Console # ASEGURADO
+# ... (imports como antes) ...
+from . import bookmarks_handler # Asegurar que está importado
 
-from guardian_spy import DEBUG_MODE 
-try:
-    from . import config_manager 
-    from . import utils 
-    from . import bookmarks_handler 
-except ImportError: 
-    import config_manager
-    import utils
-    import bookmarks_handler
+# ... (get_os_specific_browser_path como antes) ...
 
-def get_os_specific_browser_path(browser_type: str, specific_name: Optional[str] = None) -> Optional[str]:
-    # ... (sin cambios)
-    system = platform.system()
-    if specific_name: return specific_name
-    if browser_type == "firefox":
-        if system == "Windows":
-            for p in [r"C:\Program Files\Mozilla Firefox\firefox.exe", r"C:\Program Files (x86)\Mozilla Firefox\firefox.exe"]:
-                if os.path.exists(p): return p
-            return "firefox.exe" 
-        elif system == "Darwin": path = "/Applications/Firefox.app/Contents/MacOS/firefox"; return path if os.path.exists(path) else "firefox"
-        else: return "firefox"
-    elif browser_type == "chrome": 
-        if system == "Windows":
-            for p in [r"C:\Program Files\Google\Chrome\Application\chrome.exe",r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"]:
-                if os.path.exists(p): return p
-            return "chrome.exe"
-        elif system == "Darwin": path = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"; return path if os.path.exists(path) else "Google Chrome"
-        else: return "google-chrome"
-    elif browser_type == "chromium": 
-        if system == "Windows": return "chrome.exe" 
-        elif system == "Darwin": return "Chromium" 
-        else: return "chromium-browser" 
-    return None
-
-
+# MODIFICADA: load_bookmarks_to_profile
 def load_bookmarks_to_profile(
     browser_type: str, 
     profile_path: str, 
+    # Ahora toma la lista combinada de bookmarks, no un nombre de archivo de set
     combined_bookmarks_data: List[Dict], 
-    console: Optional[Console] = None
-) -> bool:
-    bm_console_for_logs = console if DEBUG_MODE and console else None
+    console=None
+):
+    """
+    Genera y escribe el archivo de bookmarks apropiado (Chrome/Firefox)
+    a partir de una lista de datos de bookmarks ya cargada y combinada.
+    """
+    bm_console_for_logs = console if DEBUG_MODE else None
 
-    if not combined_bookmarks_data: 
-        if bm_console_for_logs: bm_console_for_logs.log("[dim]No bookmark data provided to write to profile. Skipping.[/dim]")
-        return True 
+    if not combined_bookmarks_data: # Si la lista está vacía
+        if bm_console_for_logs: bm_console_for_logs.log("[dim]No bookmark data provided to write to profile.[/dim]")
+        return True # No es un error, simplemente no hay nada que escribir
 
-    dest_path: Optional[str] = None # CORRECCIÓN: Inicializar
-    content_to_write: str = ""    # CORRECCIÓN: Inicializar
-    write_mode: str = "w"
+    dest_path = None
+    content_to_write = ""
+    write_mode = "w"
 
     if browser_type in ["chrome", "chromium"]:
         default_profile_dir = os.path.join(profile_path, "Default")
@@ -75,12 +41,6 @@ def load_bookmarks_to_profile(
         if bm_console_for_logs: bm_console_for_logs.log(f"[yellow]Bookmarks writing not implemented for: {browser_type}[/yellow]")
         return False
 
-    if not dest_path or not content_to_write: # CORRECCIÓN: Chequear antes de escribir
-        if bm_console_for_logs: bm_console_for_logs.log(f"[yellow]Bookmark writing skipped: no valid dest_path or content for {browser_type}.[/yellow]")
-        # Si no hay contenido (ej. bookmarks_data estaba vacío pero no se filtró antes), no es un error de escritura.
-        # Si combined_bookmarks_data NO estaba vacío pero content_to_write SÍ lo está, es un error de generación.
-        return not combined_bookmarks_data # Retorna True si no había nada que escribir, False si debería haber habido.
-
     try:
         with open(dest_path, write_mode, encoding="utf-8") as f: f.write(content_to_write)
         if bm_console_for_logs: bm_console_for_logs.log(f"Bookmarks written to [cyan]{dest_path}[/cyan]")
@@ -91,14 +51,16 @@ def load_bookmarks_to_profile(
         if console: console.print(f"[bold red]Error writing bookmarks to {dest_path}: {e}[/bold red]")
         return False
 
-# create_profile (sin cambios respecto a la última versión que te pasé, solo confirmo que usa bookmark_set_identifier)
+# create_profile ahora usa bookmark_set_identifier
 def create_profile(browser_type: str, 
                    profile_name_prefix: str ="gs_temp_profile", 
                    profile_custom_name: Optional[str]=None, 
                    is_persistent: bool =False,      
+                   # Ahora es un identificador de set, lista de sets, o flag especial
                    bookmark_set_identifier: Union[str, List[str], None] = None, 
-                   console: Optional[Console] = None):
-    cp_console_for_logs = console if DEBUG_MODE and console else None
+                   console=None):
+    cp_console_for_logs = console if DEBUG_MODE else None
+    # ... (lógica de creación de path como antes) ...
     profile_path = None
     if is_persistent:
         if not profile_custom_name:
@@ -127,18 +89,26 @@ def create_profile(browser_type: str,
             profile_type_str = "Persistent" if is_persistent else "Temporary"
             cp_console_for_logs.log(f"Creating new {profile_type_str} browser profile directory for {browser_type} at: {profile_path}")
         
-        if bookmark_set_identifier is not None: 
+        if bookmark_set_identifier is not None: # Si es None, no se cargan bookmarks
             if cp_console_for_logs: cp_console_for_logs.log(f"Attempting to load bookmarks for identifier: '{bookmark_set_identifier}'...")
+            
+            # Cargar todos los sets de bookmarks disponibles para pasarlos a load_multiple_bookmark_sets
+            # Esto es un poco ineficiente si solo cargamos uno, pero simplifica la lógica
             all_available_sets = bookmarks_handler.get_available_bookmark_sets(console=console)
+            
             combined_data = bookmarks_handler.load_multiple_bookmark_sets(
-                bookmark_set_identifier, all_available_sets, console=console
+                bookmark_set_identifier, 
+                all_available_sets, # Pasar el diccionario de todos los sets disponibles
+                console=console
             )
-            if combined_data: 
+            if combined_data: # Solo intentar escribir si hay datos
                 load_bookmarks_to_profile(browser_type, profile_path, combined_data, console=console)
-            elif bookmark_set_identifier is not None and cp_console_for_logs:
+            elif bookmark_set_identifier is not None and cp_console_for_logs: # Si se especificó un set pero no se cargó nada
                  cp_console_for_logs.log(f"[yellow]No valid bookmarks found for identifier '{bookmark_set_identifier}'. No bookmarks loaded.[/yellow]")
+        
         return profile_path
     except Exception as e:
+        # ... (manejo de error como antes) ...
         if console: console.print(f"[bold red]Error creating browser profile directory at {profile_path}: {e}[/bold red]")
         if profile_path and os.path.exists(profile_path): 
             try: shutil.rmtree(profile_path)
@@ -146,10 +116,9 @@ def create_profile(browser_type: str,
                 if cp_console_for_logs: cp_console_for_logs.log(f"[bold red]Error cleaning up {profile_path}: {e_clean}[/bold red]")
         return None
 
-# ... (launch_browser_with_profile y remove_profile como en la última versión completa que te pasé,
-#      que ya tenían el DEBUG_MODE y la lógica de reintentos para remove_profile)
-def launch_browser_with_profile(browser_type_requested: str, profile_path: str, console: Optional[Console] = None) -> Optional[subprocess.Popen]:
-    lp_console_for_logs = console if DEBUG_MODE and console else None
+# ... (launch_browser_with_profile y remove_profile como antes) ...
+def launch_browser_with_profile(browser_type_requested, profile_path, console=None):
+    lp_console_for_logs = console if DEBUG_MODE else None
     actual_browser_type = browser_type_requested
     browser_executable = None
     if browser_type_requested == "firefox":
@@ -191,8 +160,8 @@ def launch_browser_with_profile(browser_type_requested: str, profile_path: str, 
         if console: console.print(f"[bold red]Error launching {actual_browser_type}: {e}[/bold red]")
     return None
 
-def remove_profile(profile_path: str, console: Optional[Console] = None) -> bool:
-    rp_console_for_logs = console if DEBUG_MODE and console else None
+def remove_profile(profile_path, console=None):
+    rp_console_for_logs = console if DEBUG_MODE else None
     if not profile_path or not os.path.exists(profile_path):
         if rp_console_for_logs: rp_console_for_logs.log(f"Profile dir not found: {profile_path}.")
         return True 

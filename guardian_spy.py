@@ -6,117 +6,98 @@ Guardian Spy: OPSEC Assistant for OSINT Practioners.
 Entry point for the Guardian Spy CLI application.
 """
 import sys 
-print("DEBUG: guardian_spy.py - Script started", file=sys.stderr)
+print("DEBUG: guardian_spy.py - Top of script", file=sys.stderr) # DEBUG 1
 
 import os 
 from datetime import datetime 
 import traceback 
 
-try:
-    print("DEBUG: guardian_spy.py - Attempting to import main_cli", file=sys.stderr)
-    from guardian_spy import main_cli 
-    print("DEBUG: guardian_spy.py - main_cli imported", file=sys.stderr)
-    try:
-        print("DEBUG: guardian_spy.py - Attempting to import console from main_cli", file=sys.stderr)
-        # Acceder a la consola de main_cli de forma segura
-        console_instance = getattr(main_cli, 'console', None)
-        print(f"DEBUG: guardian_spy.py - console from main_cli is {'present' if console_instance else 'None'}", file=sys.stderr)
-    except ImportError: 
-        print("DEBUG: guardian_spy.py - Failed to import console from main_cli during initial import, setting to None", file=sys.stderr)
-        console_instance = None 
-except ImportError as e_import_main:
-    print(f"FATAL ERROR: Could not import main application module (main_cli.py): {e_import_main}", file=sys.stderr)
-    traceback.print_exc()
-    sys.exit(1)
+# Variable global para la instancia de consola, se intentará poblar desde main_cli
+# Esto es para que los bloques except puedan intentar usarla si está disponible.
+# Pero no debe causar un error si main_cli falla al importar.
+effective_console_instance = sys.stderr # Fallback inicial
 
-print("DEBUG: guardian_spy.py - Attempting to import DEBUG_MODE", file=sys.stderr)
-from guardian_spy import DEBUG_MODE 
-print(f"DEBUG: guardian_spy.py - DEBUG_MODE is {DEBUG_MODE}", file=sys.stderr)
+# --- Intento de Importación de Módulos Guardian Spy ---
+print("DEBUG: guardian_spy.py - About to import guardian_spy specific modules", file=sys.stderr) # DEBUG 2
+try:
+    from guardian_spy import main_cli # Intenta importar el módulo primero
+    print("DEBUG: guardian_spy.py - main_cli module imported successfully", file=sys.stderr) # DEBUG 3
+    try:
+        # Intentar obtener la consola de Rich desde main_cli DESPUÉS de importar main_cli
+        if hasattr(main_cli, 'console') and main_cli.console is not None:
+            effective_console_instance = main_cli.console
+            print("DEBUG: guardian_spy.py - Rich console instance obtained from main_cli", file=sys.stderr) # DEBUG 4
+        else:
+            print("DEBUG: guardian_spy.py - main_cli.console not found or is None, using stderr", file=sys.stderr) # DEBUG 4b
+    except Exception as e_console_fetch:
+        print(f"DEBUG: guardian_spy.py - Error fetching console from main_cli: {e_console_fetch}, using stderr", file=sys.stderr) # DEBUG 4c
+
+    from guardian_spy import DEBUG_MODE
+    print(f"DEBUG: guardian_spy.py - DEBUG_MODE is {DEBUG_MODE}", file=sys.stderr) # DEBUG 5
+
+except ImportError as e_import_gs:
+    print(f"FATAL IMPORT ERROR in guardian_spy.py: Could not import core modules: {e_import_gs}", file=sys.stderr)
+    traceback.print_exc(file=sys.stderr)
+    # No podemos usar Rich console aquí porque la importación falló
+    input("FATAL IMPORT ERROR. Press Enter to exit...") # Pausa para ver el error
+    sys.exit(1)
+except Exception as e_early_init: # Capturar otros errores durante la inicialización de imports
+    print(f"FATAL EARLY INIT ERROR in guardian_spy.py: {e_early_init}", file=sys.stderr)
+    traceback.print_exc(file=sys.stderr)
+    input("FATAL EARLY INIT ERROR. Press Enter to exit...")
+    sys.exit(1)
+# --- Fin de Importaciones ---
+
 
 if __name__ == "__main__":
-    print("DEBUG: guardian_spy.py - Entered __main__ block", file=sys.stderr)
+    print("DEBUG: guardian_spy.py - Entered __main__ block", file=sys.stderr) # DEBUG 6
     
-    # Usar console_instance que obtuvimos arriba de forma segura
-    cli_console = console_instance 
-
-    def _minimal_banner_for_error(): # Banner simple si Rich falla o no está listo
-        print("="*40, file=sys.stderr)
-        print(" GUARDIAN SPY - ERROR ".center(40, "="), file=sys.stderr)
-        print("="*40, file=sys.stderr)
+    def _print_error_banner_fallback(): # Para errores si Rich no está disponible
+        print("="*50, file=sys.stderr)
+        print(" GUARDIAN SPY - CRITICAL ERROR ".center(50, "="), file=sys.stderr)
+        print("="*50, file=sys.stderr)
 
     try:
-        print("DEBUG: guardian_spy.py - About to call main_cli.start()", file=sys.stderr)
+        print("DEBUG: guardian_spy.py - In __main__, about to call main_cli.start()", file=sys.stderr) # DEBUG 7
         main_cli.start() 
-        print("DEBUG: guardian_spy.py - Returned from main_cli.start() (Program should have exited via sys.exit within main_cli)", file=sys.stderr)
+        print("DEBUG: guardian_spy.py - Returned from main_cli.start() (Program should have self-exited)", file=sys.stderr) # DEBUG 8
 
     except KeyboardInterrupt:
-        if cli_console and hasattr(cli_console, 'print'):
-            if hasattr(cli_console, 'clear'): cli_console.clear()
-            if hasattr(main_cli, 'display_banner_kis'): main_cli.display_banner_kis() # Intentar mostrar banner si está disponible
-            cli_console.print("\n[bold yellow]Guardian Spy session terminated by user.[/bold yellow]")
+        # ... (bloque KeyboardInterrupt como antes, usando effective_console_instance) ...
+        if hasattr(effective_console_instance, 'print') and effective_console_instance is not sys.stderr:
+            if hasattr(effective_console_instance, 'clear'): effective_console_instance.clear()
+            if hasattr(main_cli, 'display_initial_banner_and_app_info'): main_cli.display_initial_banner_and_app_info()
+            effective_console_instance.print("\n[bold yellow]Guardian Spy session terminated by user.[/bold yellow]")
         else:
             print("\nGuardian Spy session terminated by user.", file=sys.stderr)
-        
-        try:
-            if hasattr(main_cli, 'CURRENT_SESSION_SETUP') and \
-               main_cli.CURRENT_SESSION_SETUP.get("is_temp_profile") and \
-               main_cli.CURRENT_SESSION_SETUP.get("browser_profile_on_disk_path") and \
-               os.path.exists(main_cli.CURRENT_SESSION_SETUP["browser_profile_on_disk_path"]):
-                profile_to_clean = main_cli.CURRENT_SESSION_SETUP["browser_profile_on_disk_path"]
-                print(f"[Cleanup] Attempting final cleanup of: {profile_to_clean}", file=sys.stderr)
-                if hasattr(main_cli, 'browser_manager'):
-                    main_cli.browser_manager.remove_profile(profile_to_clean, console=cli_console)
-        except Exception as e_final_cleanup:
-            if DEBUG_MODE: print(f"[Debug] Error during final KbdInterrupt cleanup: {e_final_cleanup}", file=sys.stderr)
         sys.exit(130) 
 
     except SystemExit as e_sys_exit:
-        print(f"DEBUG: guardian_spy.py - Caught SystemExit with code: {e_sys_exit.code}", file=sys.stderr)
-        # El mensaje de "Exiting" se manejará en finally si es necesario, o el programa simplemente saldrá.
+        print(f"DEBUG: guardian_spy.py - Caught SystemExit (code: {e_sys_exit.code}). Exiting.", file=sys.stderr) # DEBUG 9
         sys.exit(e_sys_exit.code if e_sys_exit.code is not None else 0)
 
     except Exception as e:
-        print("DEBUG: guardian_spy.py - Caught top-level Exception", file=sys.stderr)
+        print(f"DEBUG: guardian_spy.py - Caught UNHANDLED top-level Exception: {type(e).__name__}", file=sys.stderr) # DEBUG 10
+        _print_error_banner_fallback()
+        print(f"CRITICAL ERROR: {type(e).__name__}: {e}", file=sys.stderr)
+        
         error_log_path = os.path.join(os.path.expanduser("~"), "guardian_spy_crash.log")
-        timestamp_err = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        log_msg_written = False
         try:
             with open(error_log_path, "a", encoding="utf-8") as f:
-                f.write(f"\n--- CRASH AT {timestamp_err} ---\n")
+                f.write(f"\n--- CRASH AT {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ---\n")
                 traceback.print_exc(file=f)
-            log_msg = f"Crash details logged to: {error_log_path}"
-            log_msg_written = True
+            print(f"Crash details logged to: {error_log_path}", file=sys.stderr)
         except Exception as log_e:
-            log_msg = f"Failed to write crash log: {log_e}"
+            print(f"Failed to write crash log: {log_e}", file=sys.stderr)
+
+        if DEBUG_MODE:
+            traceback.print_exc(file=sys.stderr) # Imprimir traceback a stderr si DEBUG_MODE
         
-        _minimal_banner_for_error() # Banner simple para errores
-        
-        if cli_console and hasattr(cli_console, 'print_exception') and DEBUG_MODE:
-            cli_console.print(f"[bold red]\nCRITICAL ERROR:[/bold red]")
-            cli_console.print_exception(show_locals=True, word_wrap=True, max_frames=10)
-        elif cli_console and hasattr(cli_console, 'print'):
-            cli_console.print(f"[bold red]\nCRITICAL ERROR.[/bold red]")
-            cli_console.print(f"[yellow]Type:[/yellow] {type(e).__name__}")
-            cli_console.print(f"[yellow]Msg:[/yellow] {str(e)[:500]}")
-        else: 
-            print(f"\nCRITICAL ERROR: {type(e).__name__}: {e}", file=sys.stderr)
-            traceback.print_exc() 
-        
-        if cli_console and hasattr(cli_console, 'print'):
-            if log_msg_written: cli_console.print(f"\n[bold]Log:[/bold] [cyan]{error_log_path}[/cyan]")
-            else: cli_console.print(f"\n[bold red]{log_msg}[/bold red]")
-            if not DEBUG_MODE: cli_console.print("\n[italic]Set DEBUG_MODE=True in __init__.py for more console output.[/italic]")
-            cli_console.input("Press Enter to exit...") # Pausar para ver el error
-        else:
-            print(log_msg, file=sys.stderr)
-            input("Press Enter to exit...")
+        input("Press Enter to exit...") # Pausar para ver el error
         sys.exit(1)
 
     finally:
-        print("DEBUG: guardian_spy.py - Entering guardian_spy.py finally block", file=sys.stderr)
-        # El mensaje de "Exiting" se imprime desde main_cli o aquí si hay un error muy temprano
-        # No imprimir doble si ya se salió con sys.exit()
-        # Este finally se ejecuta incluso después de sys.exit() en algunos casos,
-        # por lo que es mejor manejar los mensajes de salida dentro de los bloques try/except.
-        # print("\nGuardian Spy is exiting (from guardian_spy.py finally).", file=sys.stderr)
-        pass # Dejar que el flujo de salida natural o sys.exit() manejen el final.
+        print("DEBUG: guardian_spy.py - Reached final 'finally' block.", file=sys.stderr) # DEBUG 11
+        # El programa debería haber salido con sys.exit() antes de este punto en la mayoría de los casos.
+        # Si llegamos aquí, es una salida "natural" del try block sin un exit explícito.
+        pass

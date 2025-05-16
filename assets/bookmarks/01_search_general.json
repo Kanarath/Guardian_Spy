@@ -1,0 +1,6 @@
+[
+    {"name": "Google (NCR)", "url": "https://www.google.com/ncr", "description": "Google No Country Redirect"},
+    {"name": "DuckDuckGo", "url": "https://duckduckgo.com/", "description": "Privacy-focused search"},
+    {"name": "Startpage", "url": "https://www.startpage.com/", "description": "Private Google search results"},
+    {"name": "SearXNG Instances", "url": "https://searx.space/", "description": "List of public SearXNG instances"}
+]
